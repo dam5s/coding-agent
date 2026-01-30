@@ -69,6 +69,14 @@ fun main(args: Array<String>) {
         .apiKey(apiKey)
         .build()
 
+    fun createCompletion(params: ChatCompletionCreateParams): ChatCompletion {
+        val startTime = System.currentTimeMillis()
+        val chatCompletion = client.chat().completions().create(params)
+        val endTime = System.currentTimeMillis()
+        println("Completion took ${endTime - startTime}ms")
+        return chatCompletion
+    }
+
     val systemPrompt = """
         You are a helpful assistant that can perform various file system operations.
         
@@ -131,7 +139,7 @@ fun main(args: Array<String>) {
         .function(
             FunctionDefinition.builder()
                 .name("write_file")
-                .description("Write contents into a file with the contents and path passed as arguments")
+                .description("Write contents into a file with the contents and path passed as arguments, creates the file if it doesn't exist")
                 .parameters(
                     FunctionParameters.builder()
                         .putAdditionalProperty("type", JsonValue.from("object"))
@@ -187,7 +195,8 @@ fun main(args: Array<String>) {
 
     try {
         var jobDone = false
-        var chatCompletion = client.chat().completions().create(params)
+        var chatCompletion = createCompletion(params)
+
         var choice = chatCompletion.choices().first()
         var message = choice.message()
 
@@ -204,7 +213,7 @@ fun main(args: Array<String>) {
                     .tools(tools)
                     .build()
 
-                chatCompletion = client.chat().completions().create(params)
+                chatCompletion = createCompletion(params)
                 choice = chatCompletion.choices().first()
                 message = choice.message()
             } else {
@@ -235,8 +244,8 @@ fun main(args: Array<String>) {
                     .tools(tools)
                     .build()
 
-                println("Creating completion")
-                chatCompletion = client.chat().completions().create(params)
+                chatCompletion = createCompletion(params)
+
                 print("API Call done")
                 choice = chatCompletion.choices().first()
                 message = choice.message()
