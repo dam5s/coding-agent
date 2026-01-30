@@ -36,6 +36,18 @@ fun main(args: Array<String>) {
         exitProcess(1)
     }
 
+    val systemPrompt = """
+        You are a helpful assistant that can perform various file system operations.
+        
+        # File Copy
+        
+        You can do copies by reading the contents of a file and writing them to another file.
+        
+        # Completion
+        
+        Once you are done with your job, invoke the "job_complete" tool.
+    """.trimIndent()
+
     val apiKey = System.getenv("OPENAI_API_KEY")
     if (apiKey == null) {
         println("Error: OPENAI_API_KEY environment variable not set")
@@ -50,23 +62,11 @@ fun main(args: Array<String>) {
         "read_file" to ReadFileCommand(projectRoot),
         "list_files" to ListFilesCommand(projectRoot),
         "write_file" to WriteFileCommand(projectRoot),
-        "delete_file" to DeleteFile(projectRoot),
+        "delete_file" to DeleteFileCommand(projectRoot),
         "job_complete" to JobCompleteCommand(),
     )
 
-    val systemPrompt = """
-        You are a helpful assistant that can perform various file system operations.
-        
-        # File Copy
-        
-        You can do copies by reading the contents of a file and writing them to another file.
-        
-        # Completion
-        
-        Once you are done with your job, invoke the "job_complete" tool.
-    """.trimIndent()
-
-    val tools = listOf(listFilesTool, readFileTool, writeFileTool, jobCompleteTool)
+    val tools = listOf(listFilesTool, readFileTool, writeFileTool, deleteFileTool, jobCompleteTool)
     val app = App(userPrompt, systemPrompt, client, fileCommands, tools)
 
     try {
