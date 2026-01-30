@@ -17,21 +17,22 @@ data class DirectoryListing(val items: List<DirectoryItem>)
 
 data class FileContents(val contents: String)
 
-fun listFiles(pathArgument: PathArgument): DirectoryListing {
-    val directory = File(pathArgument.path) // TODO ensure this is under the root of the project directory.
+fun listFiles(root: File, pathArgument: PathArgument): DirectoryListing {
+    val directory = File(root, pathArgument.path)
     val items = directory.listFiles()?.map {
         DirectoryItem(it.name, it.isDirectory)
     } ?: emptyList()
     return DirectoryListing(items)
 }
 
-fun readFile(pathArgument: PathArgument): FileContents {
-    val file = File(pathArgument.path)
+fun readFile(root: File, pathArgument: PathArgument): FileContents {
+    val file = File(root, pathArgument.path)
     return FileContents(file.readText())
 }
 
-fun writeFile(pathArgument: PathArgument, contents: FileContents) {
-    val file = File(pathArgument.path)
+fun writeFile(root: File, pathArgument: PathArgument, contents: FileContents) {
+    val file = File(root, pathArgument.path)
+    file.parentFile?.mkdirs()
     file.writeText(contents.contents)
 }
 
@@ -40,8 +41,8 @@ val objectMapper = jacksonObjectMapper()
 inline fun <reified T> parse(json: String): T = objectMapper.readValue<T>(json)
 
 fun main(args: Array<String>) {
-    if (args.isEmpty()) {
-        println("Usage: <program> <path_to_prompt_file>")
+    if (args.size < 2) {
+        println("Usage: <program> <path_to_prompt_file> <path_to_project_root>")
         exitProcess(1)
     }
 
@@ -49,7 +50,15 @@ fun main(args: Array<String>) {
     val file = File(filePath)
 
     if (!file.exists()) {
-        println("Error: File not found at $filePath")
+        println("Error: Prompt file not found at $filePath")
+        exitProcess(1)
+    }
+
+    val projectRootPath = args[1]
+    val projectRoot = File(projectRootPath)
+
+    if (!projectRoot.exists() || !projectRoot.isDirectory) {
+        println("Error: Project root directory not found at $projectRootPath")
         exitProcess(1)
     }
 
@@ -205,7 +214,7 @@ fun main(args: Array<String>) {
             val executingToolCall = message.toolCalls().isPresent && message.toolCalls().get().isNotEmpty()
 
             if (executingToolCall) {
-                jobDone = executeToolCallAndUpdateMessages(message, messages)
+                jobDone = executeToolCallAndUpdateMessages(projectRoot, message, messages)
 
                 params = ChatCompletionCreateParams.builder()
                     .model(ChatModel.GPT_4O)
@@ -269,6 +278,7 @@ private fun ChatCompletionMessage.printResult() {
 }
 
 private fun executeToolCallAndUpdateMessages(
+    root: File,
     message: ChatCompletionMessage,
     messages: MutableList<ChatCompletionMessageParam>,
 ): Boolean {
@@ -302,7 +312,7 @@ private fun executeToolCallAndUpdateMessages(
 
             "list_files" -> {
                 val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                val result = listFiles(pathArgument)
+                val result = listFiles(root, pathArgument)
                 val resultJson = objectMapper.writeValueAsString(result)
 
                 messages.add(
@@ -318,7 +328,7 @@ private fun executeToolCallAndUpdateMessages(
 
             "read_file" -> {
                 val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                val result = readFile(pathArgument)
+                val result = readFile(root, pathArgument)
                 val resultJson = objectMapper.writeValueAsString(result)
 
                 messages.add(
@@ -335,7 +345,7 @@ private fun executeToolCallAndUpdateMessages(
             "write_file" -> {
                 val pathArgument = parse<PathArgument>(toolCall.function().arguments())
                 val contentsArgument = parse<FileContents>(toolCall.function().arguments())
-                writeFile(pathArgument, contentsArgument)
+                writeFile(root, pathArgument, contentsArgument)
 
                 val resultJson = objectMapper.writeValueAsString(mapOf("result" to "success"))
 
