@@ -15,12 +15,19 @@ data class DirectoryItem(val name: String, val isDirectory: Boolean)
 
 data class DirectoryListing(val items: List<DirectoryItem>)
 
+data class FileContents(val contents: String)
+
 fun listFiles(pathArgument: PathArgument): DirectoryListing {
     val directory = File(pathArgument.path) // TODO ensure this is under the root of the project directory.
     val items = directory.listFiles()?.map {
         DirectoryItem(it.name, it.isDirectory)
     } ?: emptyList()
     return DirectoryListing(items)
+}
+
+fun readFile(pathArgument: PathArgument): FileContents {
+    val file = File(pathArgument.path)
+    return FileContents(file.readText())
 }
 
 val objectMapper = jacksonObjectMapper()
@@ -58,7 +65,7 @@ fun main(args: Array<String>) {
         .build()
 
     // Define a simple tool
-    val tool = ChatCompletionTool.builder()
+    val listFilesTool = ChatCompletionTool.builder()
         .type(ChatCompletionTool.Type.FUNCTION)
         .function(
             FunctionDefinition.builder()
@@ -80,6 +87,28 @@ fun main(args: Array<String>) {
         )
         .build()
 
+    val readFileTool = ChatCompletionTool.builder()
+        .type(ChatCompletionTool.Type.FUNCTION)
+        .function(
+            FunctionDefinition.builder()
+                .name("read_file")
+                .description("Get the contents of a file with the path passed as argument")
+                .parameters(
+                    FunctionParameters.builder()
+                        .putAdditionalProperty("type", JsonValue.from("object"))
+                        .putAdditionalProperty("properties", JsonValue.from(mapOf(
+                            "path" to mapOf(
+                                "type" to "string",
+                                "description" to "Relative path to the file we are reading"
+                            )
+                        )))
+                        .putAdditionalProperty("required", JsonValue.from(listOf("path")))
+                        .build()
+                )
+                .build()
+        )
+        .build()
+
     val messages = mutableListOf(
         ChatCompletionMessageParam.ofChatCompletionUserMessageParam(
             ChatCompletionUserMessageParam.builder()
@@ -92,7 +121,7 @@ fun main(args: Array<String>) {
     var params = ChatCompletionCreateParams.builder()
         .model(ChatModel.GPT_4O)
         .messages(messages)
-        .tools(listOf(tool))
+        .tools(listOf(listFilesTool, readFileTool))
         .build()
 
     try {
@@ -114,18 +143,34 @@ fun main(args: Array<String>) {
 
             // Process each tool call
             for (toolCall in toolCalls) {
-                if (toolCall.function().name() == "list_files") {
-                    val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                    val result = listFiles(pathArgument)
-                    val resultJson = objectMapper.writeValueAsString(result)
+                when (toolCall.function().name()) {
+                    "list_files" -> {
+                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                        val result = listFiles(pathArgument)
+                        val resultJson = objectMapper.writeValueAsString(result)
 
-                    messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
-                        ChatCompletionToolMessageParam.builder()
-                            .role(ChatCompletionToolMessageParam.Role.TOOL)
-                            .toolCallId(toolCall.id())
-                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
-                            .build()
-                    ))
+                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                            ChatCompletionToolMessageParam.builder()
+                                .role(ChatCompletionToolMessageParam.Role.TOOL)
+                                .toolCallId(toolCall.id())
+                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                                .build()
+                        ))
+                    }
+
+                    "read_file" -> {
+                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                        val result = readFile(pathArgument)
+                        val resultJson = objectMapper.writeValueAsString(result)
+
+                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                            ChatCompletionToolMessageParam.builder()
+                                .role(ChatCompletionToolMessageParam.Role.TOOL)
+                                .toolCallId(toolCall.id())
+                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                                .build()
+                        ))
+                    }
                 }
             }
 
