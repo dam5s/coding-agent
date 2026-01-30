@@ -1,10 +1,26 @@
+import java.util.Properties
+
 plugins {
     kotlin("jvm") version "2.2.21"
     application
 }
 
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
 application {
     mainClass.set("org.example.MainKt")
+}
+
+tasks.withType<JavaExec> {
+    val apiKey = localProperties.getProperty("openai.api.key")
+    if (apiKey != null) {
+        environment("OPENAI_API_KEY", apiKey)
+    }
 }
 
 group = "org.example"
@@ -15,8 +31,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.openai:openai-java:0.12.0")
     testImplementation(kotlin("test"))
 }
 
