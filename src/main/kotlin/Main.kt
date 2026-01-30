@@ -53,8 +53,8 @@ fun main(args: Array<String>) {
         exitProcess(1)
     }
 
-    val prompt = file.readText().trim()
-    if (prompt.isEmpty()) {
+    val userPrompt = file.readText().trim()
+    if (userPrompt.isEmpty()) {
         println("Error: Prompt file is empty")
         exitProcess(1)
     }
@@ -68,6 +68,18 @@ fun main(args: Array<String>) {
     val client: OpenAIClient = OpenAIOkHttpClient.builder()
         .apiKey(apiKey)
         .build()
+
+    val systemPrompt = """
+        You are a helpful assistant that can perform various file system operations.
+        
+        # File Copy
+        
+        You can do copies by reading the contents of a file and writing them to another file.
+        
+        # Completion
+        
+        Once you are done with your job, invoke the "job_complete" tool.
+    """.trimIndent()
 
     // Define a simple tool
     val listFilesTool = ChatCompletionTool.builder()
@@ -140,106 +152,196 @@ fun main(args: Array<String>) {
         )
         .build()
 
+    val jobCompleteTool = ChatCompletionTool.builder()
+        .type(ChatCompletionTool.Type.FUNCTION)
+        .function(
+            FunctionDefinition.builder()
+                .name("job_complete")
+                .description("Invoke this once you are done with your job")
+                .build()
+        )
+        .build()
+
     val messages = mutableListOf(
+        ChatCompletionMessageParam.ofChatCompletionSystemMessageParam(
+            ChatCompletionSystemMessageParam.builder()
+                .role(ChatCompletionSystemMessageParam.Role.SYSTEM)
+                .content(ChatCompletionSystemMessageParam.Content.ofTextContent(systemPrompt))
+                .build()
+        ),
         ChatCompletionMessageParam.ofChatCompletionUserMessageParam(
             ChatCompletionUserMessageParam.builder()
                 .role(ChatCompletionUserMessageParam.Role.USER)
-                .content(ChatCompletionUserMessageParam.Content.ofTextContent(prompt))
+                .content(ChatCompletionUserMessageParam.Content.ofTextContent(userPrompt))
                 .build()
-        )
+        ),
     )
+
+    val tools = listOf(listFilesTool, readFileTool, writeFileTool, jobCompleteTool)
 
     var params = ChatCompletionCreateParams.builder()
         .model(ChatModel.GPT_4O)
         .messages(messages)
-        .tools(listOf(listFilesTool, readFileTool, writeFileTool))
+        .tools(tools)
         .build()
 
     try {
+        var jobDone = false
         var chatCompletion = client.chat().completions().create(params)
         var choice = chatCompletion.choices().first()
         var message = choice.message()
 
-        if (message.toolCalls().isPresent && message.toolCalls().get().isNotEmpty()) {
-            val toolCalls = message.toolCalls().get()
-            println("AI wants to call tools: ${toolCalls.joinToString { it.function().name() }}")
+        while (!jobDone) {
+            println("Looking at message to decide what to do next")
+            val executingToolCall = message.toolCalls().isPresent && message.toolCalls().get().isNotEmpty()
 
-            // Add the assistant's message with tool calls to the conversation
-            messages.add(ChatCompletionMessageParam.ofChatCompletionAssistantMessageParam(
-                ChatCompletionAssistantMessageParam.builder()
-                    .role(ChatCompletionAssistantMessageParam.Role.ASSISTANT)
-                    .toolCalls(toolCalls)
+            if (executingToolCall) {
+                jobDone = executeToolCallAndUpdateMessages(message, messages)
+
+                params = ChatCompletionCreateParams.builder()
+                    .model(ChatModel.GPT_4O)
+                    .messages(messages)
+                    .tools(tools)
                     .build()
-            ))
 
-            // Process each tool call
-            for (toolCall in toolCalls) {
-                when (toolCall.function().name()) {
-                    "list_files" -> {
-                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                        val result = listFiles(pathArgument)
-                        val resultJson = objectMapper.writeValueAsString(result)
+                chatCompletion = client.chat().completions().create(params)
+                choice = chatCompletion.choices().first()
+                message = choice.message()
+            } else {
+                message.printResult()
 
-                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
-                            ChatCompletionToolMessageParam.builder()
-                                .role(ChatCompletionToolMessageParam.Role.TOOL)
-                                .toolCallId(toolCall.id())
-                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
-                                .build()
-                        ))
-                    }
+                println("Adding prompt to invoke tool")
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionAssistantMessageParam(
+                        ChatCompletionAssistantMessageParam.builder()
+                            .role(ChatCompletionAssistantMessageParam.Role.ASSISTANT)
+                            .content(message.content().orElse(""))
+                            .build()
+                    )
+                )
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionSystemMessageParam(
+                        ChatCompletionSystemMessageParam.builder()
+                            .role(ChatCompletionSystemMessageParam.Role.SYSTEM)
+                            .content(ChatCompletionSystemMessageParam.Content.ofTextContent("Invoke the necessary tool for your next step."))
+                            .build()
+                    ),
+                )
 
-                    "read_file" -> {
-                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                        val result = readFile(pathArgument)
-                        val resultJson = objectMapper.writeValueAsString(result)
+                println("Settings params with tools")
+                params = ChatCompletionCreateParams.builder()
+                    .model(ChatModel.GPT_4O)
+                    .messages(messages)
+                    .tools(tools)
+                    .build()
 
-                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
-                            ChatCompletionToolMessageParam.builder()
-                                .role(ChatCompletionToolMessageParam.Role.TOOL)
-                                .toolCallId(toolCall.id())
-                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
-                                .build()
-                        ))
-                    }
-
-                    "write_file" -> {
-                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
-                        val contentsArgument = parse<FileContents>(toolCall.function().arguments())
-                        writeFile(pathArgument, contentsArgument)
-
-                        val resultJson = objectMapper.writeValueAsString(mapOf("result" to "success"))
-
-                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
-                            ChatCompletionToolMessageParam.builder()
-                                .role(ChatCompletionToolMessageParam.Role.TOOL)
-                                .toolCallId(toolCall.id())
-                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
-                                .build()
-                        ))
-                    }
-                }
+                println("Creating completion")
+                chatCompletion = client.chat().completions().create(params)
+                print("API Call done")
+                choice = chatCompletion.choices().first()
+                message = choice.message()
             }
-
-            // Get the final response from the model
-            params = ChatCompletionCreateParams.builder()
-                .model(ChatModel.GPT_4O)
-                .messages(messages)
-                .build()
-
-            chatCompletion = client.chat().completions().create(params)
-            choice = chatCompletion.choices().first()
-            message = choice.message()
         }
 
-        val result = message.content()
-        if (result.isPresent) {
-            println(result.get())
-        } else {
-            println("Error: No response from OpenAI")
-        }
     } catch (e: Exception) {
         println("Error: ${e.message}")
         exitProcess(1)
     }
+}
+
+private fun ChatCompletionMessage.printResult() {
+    val result = content()
+
+    if (result.isPresent) {
+        println(result.get())
+    } else {
+        println("Error: No response from OpenAI")
+    }
+}
+
+private fun executeToolCallAndUpdateMessages(
+    message: ChatCompletionMessage,
+    messages: MutableList<ChatCompletionMessageParam>,
+): Boolean {
+    val toolCalls = message.toolCalls().get()
+    println("AI wants to call tools: ${toolCalls.joinToString { it.function().name() }}")
+
+    // Add the assistant's message with tool calls to the conversation
+    messages.add(
+        ChatCompletionMessageParam.ofChatCompletionAssistantMessageParam(
+            ChatCompletionAssistantMessageParam.builder()
+                .role(ChatCompletionAssistantMessageParam.Role.ASSISTANT)
+                .toolCalls(toolCalls)
+                .build()
+        )
+    )
+
+    for (toolCall in toolCalls) {
+        when (toolCall.function().name()) {
+            "job_complete" -> {
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                        ChatCompletionToolMessageParam.builder()
+                            .role(ChatCompletionToolMessageParam.Role.TOOL)
+                            .toolCallId(toolCall.id())
+                            .content(ChatCompletionToolMessageParam.Content.ofTextContent("Job complete"))
+                            .build()
+                    )
+                )
+                return true
+            }
+
+            "list_files" -> {
+                val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                val result = listFiles(pathArgument)
+                val resultJson = objectMapper.writeValueAsString(result)
+
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                        ChatCompletionToolMessageParam.builder()
+                            .role(ChatCompletionToolMessageParam.Role.TOOL)
+                            .toolCallId(toolCall.id())
+                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                            .build()
+                    )
+                )
+            }
+
+            "read_file" -> {
+                val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                val result = readFile(pathArgument)
+                val resultJson = objectMapper.writeValueAsString(result)
+
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                        ChatCompletionToolMessageParam.builder()
+                            .role(ChatCompletionToolMessageParam.Role.TOOL)
+                            .toolCallId(toolCall.id())
+                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                            .build()
+                    )
+                )
+            }
+
+            "write_file" -> {
+                val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                val contentsArgument = parse<FileContents>(toolCall.function().arguments())
+                writeFile(pathArgument, contentsArgument)
+
+                val resultJson = objectMapper.writeValueAsString(mapOf("result" to "success"))
+
+                messages.add(
+                    ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                        ChatCompletionToolMessageParam.builder()
+                            .role(ChatCompletionToolMessageParam.Role.TOOL)
+                            .toolCallId(toolCall.id())
+                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                            .build()
+                    )
+                )
+            }
+        }
+    }
+
+    return false
 }
