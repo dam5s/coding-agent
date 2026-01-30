@@ -31,6 +31,7 @@ fun readFile(root: File, pathArgument: PathArgument): FileContents {
 }
 
 fun writeFile(root: File, pathArgument: PathArgument, contents: FileContents) {
+    root.mkdirs()
     val file = File(root, pathArgument.path)
     file.parentFile?.mkdirs()
     file.writeText(contents.contents)
@@ -57,8 +58,10 @@ fun main(args: Array<String>) {
     val projectRootPath = args[1]
     val projectRoot = File(projectRootPath)
 
+    projectRoot.mkdirs()
+
     if (!projectRoot.exists() || !projectRoot.isDirectory) {
-        println("Error: Project root directory not found at $projectRootPath")
+        println("Error: Project root should be a directory at $projectRootPath")
         exitProcess(1)
     }
 
@@ -148,7 +151,7 @@ fun main(args: Array<String>) {
         .function(
             FunctionDefinition.builder()
                 .name("write_file")
-                .description("Write contents into a file with the contents and path passed as arguments, creates the file if it doesn't exist")
+                .description("Write contents into a file with the contents and path passed as arguments, creates the file if it doesn't exist and any needed parent directories.")
                 .parameters(
                     FunctionParameters.builder()
                         .putAdditionalProperty("type", JsonValue.from("object"))
