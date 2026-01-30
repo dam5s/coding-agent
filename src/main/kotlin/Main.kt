@@ -30,6 +30,11 @@ fun readFile(pathArgument: PathArgument): FileContents {
     return FileContents(file.readText())
 }
 
+fun writeFile(pathArgument: PathArgument, contents: FileContents) {
+    val file = File(pathArgument.path)
+    file.writeText(contents.contents)
+}
+
 val objectMapper = jacksonObjectMapper()
 
 inline fun <reified T> parse(json: String): T = objectMapper.readValue<T>(json)
@@ -109,6 +114,32 @@ fun main(args: Array<String>) {
         )
         .build()
 
+    val writeFileTool = ChatCompletionTool.builder()
+        .type(ChatCompletionTool.Type.FUNCTION)
+        .function(
+            FunctionDefinition.builder()
+                .name("write_file")
+                .description("Write contents into a file with the contents and path passed as arguments")
+                .parameters(
+                    FunctionParameters.builder()
+                        .putAdditionalProperty("type", JsonValue.from("object"))
+                        .putAdditionalProperty("properties", JsonValue.from(mapOf(
+                            "path" to mapOf(
+                                "type" to "string",
+                                "description" to "Relative path to the file we are writing"
+                            ),
+                            "contents" to mapOf(
+                                "type" to "string",
+                                "description" to "Contents to write into the file"
+                            )
+                        )))
+                        .putAdditionalProperty("required", JsonValue.from(listOf("path", "contents")))
+                        .build()
+                )
+                .build()
+        )
+        .build()
+
     val messages = mutableListOf(
         ChatCompletionMessageParam.ofChatCompletionUserMessageParam(
             ChatCompletionUserMessageParam.builder()
@@ -121,7 +152,7 @@ fun main(args: Array<String>) {
     var params = ChatCompletionCreateParams.builder()
         .model(ChatModel.GPT_4O)
         .messages(messages)
-        .tools(listOf(listFilesTool, readFileTool))
+        .tools(listOf(listFilesTool, readFileTool, writeFileTool))
         .build()
 
     try {
@@ -162,6 +193,22 @@ fun main(args: Array<String>) {
                         val pathArgument = parse<PathArgument>(toolCall.function().arguments())
                         val result = readFile(pathArgument)
                         val resultJson = objectMapper.writeValueAsString(result)
+
+                        messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                            ChatCompletionToolMessageParam.builder()
+                                .role(ChatCompletionToolMessageParam.Role.TOOL)
+                                .toolCallId(toolCall.id())
+                                .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                                .build()
+                        ))
+                    }
+
+                    "write_file" -> {
+                        val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                        val contentsArgument = parse<FileContents>(toolCall.function().arguments())
+                        writeFile(pathArgument, contentsArgument)
+
+                        val resultJson = objectMapper.writeValueAsString(mapOf("result" to "success"))
 
                         messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
                             ChatCompletionToolMessageParam.builder()
