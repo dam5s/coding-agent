@@ -4,8 +4,28 @@ import com.openai.client.OpenAIClient
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.core.JsonValue
 import com.openai.models.*
+import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import java.io.File
 import kotlin.system.exitProcess
+
+data class PathArgument(val path: String)
+
+data class DirectoryItem(val name: String, val isDirectory: Boolean)
+
+data class DirectoryListing(val items: List<DirectoryItem>)
+
+fun listFiles(pathArgument: PathArgument): DirectoryListing {
+    val directory = File(pathArgument.path) // TODO ensure this is under the root of the project directory.
+    val items = directory.listFiles()?.map {
+        DirectoryItem(it.name, it.isDirectory)
+    } ?: emptyList()
+    return DirectoryListing(items)
+}
+
+val objectMapper = jacksonObjectMapper()
+
+inline fun <reified T> parse(json: String): T = objectMapper.readValue<T>(json)
 
 fun main(args: Array<String>) {
     if (args.isEmpty()) {
@@ -42,25 +62,25 @@ fun main(args: Array<String>) {
         .type(ChatCompletionTool.Type.FUNCTION)
         .function(
             FunctionDefinition.builder()
-                .name("get_weather")
-                .description("Get the current weather in a given location")
+                .name("list_files")
+                .description("Get the list of files in the directory passed as argument")
                 .parameters(
                     FunctionParameters.builder()
                         .putAdditionalProperty("type", JsonValue.from("object"))
                         .putAdditionalProperty("properties", JsonValue.from(mapOf(
-                            "location" to mapOf(
+                            "path" to mapOf(
                                 "type" to "string",
-                                "description" to "The city and state, e.g. San Francisco, CA"
+                                "description" to "Relative path to the directory we are listing"
                             )
                         )))
-                        .putAdditionalProperty("required", JsonValue.from(listOf("location")))
+                        .putAdditionalProperty("required", JsonValue.from(listOf("path")))
                         .build()
                 )
                 .build()
         )
         .build()
 
-    val messages = mutableListOf<ChatCompletionMessageParam>(
+    val messages = mutableListOf(
         ChatCompletionMessageParam.ofChatCompletionUserMessageParam(
             ChatCompletionUserMessageParam.builder()
                 .role(ChatCompletionUserMessageParam.Role.USER)
@@ -94,19 +114,16 @@ fun main(args: Array<String>) {
 
             // Process each tool call
             for (toolCall in toolCalls) {
-                if (toolCall.function().name() == "get_weather") {
-                    val argsJson = toolCall.function().arguments()
-                    println("Tool arguments: $argsJson")
-                    
-                    // Simulate tool execution
-                    val toolResult = "{\"location\": \"San Francisco, CA\", \"temperature\": \"22\", \"unit\": \"celsius\", \"description\": \"Sunny\"}"
-                    
-                    // Add tool response to the conversation
+                if (toolCall.function().name() == "list_files") {
+                    val pathArgument = parse<PathArgument>(toolCall.function().arguments())
+                    val result = listFiles(pathArgument)
+                    val resultJson = objectMapper.writeValueAsString(result)
+
                     messages.add(ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
                         ChatCompletionToolMessageParam.builder()
                             .role(ChatCompletionToolMessageParam.Role.TOOL)
                             .toolCallId(toolCall.id())
-                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(toolResult))
+                            .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
                             .build()
                     ))
                 }
@@ -117,7 +134,7 @@ fun main(args: Array<String>) {
                 .model(ChatModel.GPT_4O)
                 .messages(messages)
                 .build()
-            
+
             chatCompletion = client.chat().completions().create(params)
             choice = chatCompletion.choices().first()
             message = choice.message()

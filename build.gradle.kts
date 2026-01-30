@@ -32,6 +32,7 @@ repositories {
 
 dependencies {
     implementation("com.openai:openai-java:0.12.0")
+    implementation("tools.jackson.module:jackson-module-kotlin:3.0.4")
     testImplementation(kotlin("test"))
 }
 
