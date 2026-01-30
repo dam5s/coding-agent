@@ -5,7 +5,7 @@
 Create a prompt.txt with your prompt. Then run
 
 ```
-./gradlew --run --args="prompt.txt my-project"
+./gradlew run --args="prompt.txt my-project"
 ```
 
 ## Example prompts:
