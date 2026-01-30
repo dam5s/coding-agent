@@ -2,12 +2,9 @@ package org.example
 
 import com.openai.client.OpenAIClient
 import com.openai.client.okhttp.OpenAIOkHttpClient
-import tools.jackson.module.kotlin.readValue
 import java.io.File
 import kotlin.system.exitProcess
 
-
-inline fun <reified T> parse(json: String): T = objectMapper.readValue<T>(json)
 
 fun main(args: Array<String>) {
     if (args.size < 2) {
@@ -52,9 +49,10 @@ fun main(args: Array<String>) {
     val fileCommands = mapOf(
         "read_file" to ReadFileCommand(projectRoot),
         "list_files" to ListFilesCommand(projectRoot),
-        "write_file" to WriteFileCommand(projectRoot)
+        "write_file" to WriteFileCommand(projectRoot),
+        "delete_file" to DeleteFile(projectRoot),
+        "job_complete" to JobCompleteCommand(),
     )
-
 
     val systemPrompt = """
         You are a helpful assistant that can perform various file system operations.

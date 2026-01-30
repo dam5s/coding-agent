@@ -12,3 +12,9 @@ val jobCompleteTool = ChatCompletionTool.builder()
             .build()
     )
     .build()
+
+class JobCompleteCommand: FileCommand {
+    override fun execute(input: String): Any {
+        return mapOf("result" to "success")
+    }
+}

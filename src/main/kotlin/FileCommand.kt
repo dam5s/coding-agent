@@ -1,21 +1,11 @@
 package org.example
 
-import com.openai.models.ChatCompletionMessageParam
-import com.openai.models.ChatCompletionMessageToolCall
-import com.openai.models.ChatCompletionToolMessageParam
 import tools.jackson.module.kotlin.jacksonObjectMapper
 
-interface FileCommand {
-    fun execute(toolCall: ChatCompletionMessageToolCall): ChatCompletionMessageParam
-}
 
-fun toolMessage(toolCallId: String, resultJson: String) = ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
-    ChatCompletionToolMessageParam.builder()
-        .role(ChatCompletionToolMessageParam.Role.TOOL)
-        .toolCallId(toolCallId)
-        .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
-        .build()
-)
+interface FileCommand {
+    fun execute(input: String): Any
+}
 
 data class PathArgument(val path: String)
 

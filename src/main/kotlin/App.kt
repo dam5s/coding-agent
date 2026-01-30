@@ -101,12 +101,28 @@ class App(
         )
 
         for (toolCall in toolCalls) {
-            if (toolCall.function().name() == "job_complete") {
-                messages.add(toolMessage(toolCall.id(), "Job complete"))
+            val toolName = toolCall.function().name()
+
+
+            val command = fileCommands[toolName]
+                ?: continue
+
+            val result = command.execute(toolCall.function().arguments())
+            val resultJson = objectMapper.writeValueAsString(result)
+
+            messages.add(
+                ChatCompletionMessageParam.ofChatCompletionToolMessageParam(
+                    ChatCompletionToolMessageParam.builder()
+                        .role(ChatCompletionToolMessageParam.Role.TOOL)
+                        .toolCallId(toolCall.id())
+                        .content(ChatCompletionToolMessageParam.Content.ofTextContent(resultJson))
+                        .build()
+                )
+            )
+
+            if (toolName == "job_complete") {
                 return true
             }
-
-            fileCommands[toolCall.function().name()]?.execute(toolCall)?.let { message -> messages.add(message) }
         }
 
         return false
